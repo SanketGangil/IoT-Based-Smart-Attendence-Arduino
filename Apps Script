@@ -1,0 +1,22 @@
+function doGet(e) {
+    Logger.log("Request received: " + JSON.stringify(e));
+
+    if (!e || !e.parameter) {
+        return ContentService.createTextOutput("Error: No parameters received");
+    }
+
+    // Debugging: Log received parameters
+    Logger.log("ID: " + e.parameter.id);
+    Logger.log("Roll Number: " + e.parameter.rollNumber);
+    Logger.log("Name: " + e.parameter.name);
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var id = e.parameter.id || "Unknown";
+    var rollNumber = e.parameter.rollNumber || "Unknown";
+    var name = e.parameter.name || "Unknown";
+    var timestamp = new Date();
+
+    sheet.appendRow([timestamp, id, rollNumber, name]);
+
+    return ContentService.createTextOutput("Success");
+}
