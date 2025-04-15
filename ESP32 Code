@@ -1,0 +1,189 @@
+#include <LiquidCrystal.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Adafruit_Fingerprint.h>
+
+// Fingerprint sensor pins
+#define RX_PIN 16
+#define TX_PIN 17
+
+// Output pins
+#define RED_LED 26
+#define BLUE_LED 27
+#define BUZZER 25
+
+// WiFi credentials
+const char* ssid = "Wifu";
+const char* password = "sanket 1234";
+const String googleScriptURL = "https://script.google.com/macros/s/AKfycbwiaGw2IehK0yCUsp68tl9AXUuFq-cBji8mQ22jPXqIV4fWXM1gB1ILc2ZeaZufqwfdSg/exec";
+
+// LCD pin setup (RS, EN, D4, D5, D6, D7) — adjust to your wiring
+LiquidCrystal lcd(23, 22, 21, 19, 18, 5);
+
+// Fingerprint sensor setup
+HardwareSerial mySerial(2);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// Student list
+struct Student {
+    int fpsID;
+    String rollNumber;
+    String name;
+};
+
+Student students[] = {
+  { 1, "2022UEI6567", "Sumedha" },
+  { 2, "2022UEI2838", "Kusagra Kumar" },
+  { 3, "2022UEI2843", "Sanket Gangil" },
+  { 4, "2022UEI2844", "Shivam Kumar" },
+  { 5, "2022UEI2847", "Gaurav" },
+  { 6, "2022UEI2800", "nahi pta" },
+  { 7, "2022UEI4591", "Bhavesh" },
+  { 12, "2022PEV3213", "Bobby Baghel" }
+};
+
+void setup() {
+    Serial.begin(115200);
+    mySerial.begin(57600, SERIAL_8N1, RX_PIN, TX_PIN);
+
+    lcd.begin(16, 2);
+    lcd.clear();
+
+    pinMode(RED_LED, OUTPUT);
+    pinMode(BLUE_LED, OUTPUT);
+    pinMode(BUZZER, OUTPUT);
+
+    digitalWrite(RED_LED, LOW);
+    digitalWrite(BLUE_LED, LOW);
+    digitalWrite(BUZZER, LOW);
+
+    finger.begin(57600);
+    if (finger.verifyPassword()) {
+        Serial.println("Fingerprint sensor found!");
+    } else {
+        Serial.println("Fingerprint sensor not detected.");
+        while (1);
+    }
+
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+    Serial.println("Connected to WiFi!");
+
+    displayIdleScreen();
+}
+
+void loop() {
+    Serial.println("Waiting for fingerprint...");
+
+    int id = getFingerprintID();
+    if (id > 0) {
+        Serial.print("Matched! ID: "); Serial.println(id);
+        displayMatched(id);
+
+        digitalWrite(BLUE_LED, HIGH);
+        delay(500);
+        digitalWrite(BLUE_LED, LOW);
+
+        sendToGoogleSheets(id);
+    } 
+    else if (id == 0) {
+        Serial.println("Fingerprint Not Matched!");
+        displayNotMatched();
+
+        digitalWrite(RED_LED, HIGH);
+        delay(500);
+        digitalWrite(RED_LED, LOW);
+
+        digitalWrite(BUZZER, HIGH);
+        delay(500);
+        digitalWrite(BUZZER, LOW);
+    }
+
+    displayIdleScreen();
+}
+
+void displayIdleScreen() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Date: 02-Apr-25");  // Replace with RTC if you add it
+    lcd.setCursor(0, 1);
+    lcd.print("Place Finger..");
+}
+
+void displayMatched(int id) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Matched! ID:");
+
+    lcd.setCursor(0, 1);
+    String rollNumber = "Unknown";
+    String name = "Unknown";
+
+    for (int i = 0; i < sizeof(students) / sizeof(students[0]); i++) {
+        if (students[i].fpsID == id) {
+            rollNumber = students[i].rollNumber;
+            name = students[i].name;
+            break;
+        }
+    }
+
+    lcd.print(rollNumber.substring(rollNumber.length() - 4));  // Last 4 chars
+}
+
+void displayNotMatched() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Fingerprint");
+    lcd.setCursor(0, 1);
+    lcd.print("Not Matched!");
+}
+
+int getFingerprintID() {
+    int p = finger.getImage();
+    if (p != FINGERPRINT_OK) return -1;
+
+    p = finger.image2Tz();
+    if (p != FINGERPRINT_OK) return -1;
+
+    p = finger.fingerFastSearch();
+    return (p == FINGERPRINT_OK) ? finger.fingerID : 0;
+}
+
+void sendToGoogleSheets(int id) {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+
+        String rollNumber = "Unknown";
+        String name = "Unknown";
+
+        for (int i = 0; i < sizeof(students) / sizeof(students[0]); i++) {
+            if (students[i].fpsID == id) {
+                rollNumber = students[i].rollNumber;
+                name = students[i].name;
+                break;
+            }
+        }
+
+        rollNumber.replace(" ", "%20");
+        name.replace(" ", "%20");
+
+        String url = googleScriptURL + "?id=" + String(id) + "&rollNumber=" + rollNumber + "&name=" + name;
+        Serial.println("Sending to Google Sheets: " + url);
+
+        http.begin(url);
+        int httpCode = http.GET();
+
+        if (httpCode > 0) {
+            String response = http.getString();
+            Serial.println("Response: " + response);
+        } else {
+            Serial.print("Error sending data. HTTP Code: ");
+            Serial.println(httpCode);
+        }
+
+        http.end();
+    }
+}
